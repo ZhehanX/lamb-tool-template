@@ -7,12 +7,14 @@ redirect (303) to the right in-tool page with the session token on the URL
 (the iframe-safe fallback; the cookie is set too)."""
 
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import config, db, sessions
 from ..lti import validation
+from ..workshop import store
 
 logger = logging.getLogger("lti")
 router = APIRouter()
@@ -66,9 +68,17 @@ async def lti_launch(request: Request):
     else:
         # A student who arrives before the instructor has configured the
         # activity gets a friendly waiting page, not an error.
-        dest = "/chat" if activity else "/waiting"
+        dest = "/workshop/" if activity else "/waiting"
+        # "Teacher first": students wait until the teacher has tried it.
+        if (activity and store.get_settings(resource_link_id, consumer_guid)["teacher_first"]
+                and not store.teacher_has_tried(resource_link_id, consumer_guid)):
+            dest = "/waiting"
 
-    response = RedirectResponse(url=f"{dest}?session={token}", status_code=303)
+    url = f"{dest}?session={token}"
+    # The wizard starts in the LMS language (the old branch's decision C6).
+    if locale := form.get("launch_presentation_locale", ""):
+        url += f"&lang={quote(locale)}"
+    response = RedirectResponse(url=url, status_code=303)
     # SameSite=None so the cookie survives the LMS iframe; Secure required
     # with SameSite=None (works once served over HTTPS, as Atenea is).
     response.set_cookie(

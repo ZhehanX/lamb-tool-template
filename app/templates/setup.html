@@ -1,45 +1,84 @@
 {% extends "base.html" %}
-{% block title %}Activity setup{% endblock %}
+{% block title %}Workshop setup{% endblock %}
 {% block content %}
-  <h1>Set up this activity</h1>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <h1>Set up this AI Workshop</h1>
+  <p id="setup-error" class="error" {% if not error %}hidden{% endif %}>{{ error or '' }}</p>
   <form id="setup-form">
     <label>Activity title
       <input name="title" value="{{ activity['title'] if activity else '' }}" required>
     </label>
-    <label>Assistant
-      <select name="assistant_model" required>
-        <option value="" disabled {{ '' if activity else 'selected' }}>— pick one —</option>
-        {% for m in models %}
-          <option value="{{ m.id }}"
-            {{ 'selected' if activity and activity['assistant_model'] == m.id else '' }}>
-            {{ m.name }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="row">
-      <input type="checkbox" name="grading_enabled"
-        {{ 'checked' if activity and activity['grading_enabled'] else '' }}>
-      Enable grade passback
-    </label>
-    <label>Turns for completion
-      <input type="number" name="min_turns" min="0"
-        value="{{ activity['min_turns'] if activity else 3 }}">
-    </label>
+
+    <section class="card">
+      <h2>Model</h2>
+      {% if engine %}
+        <p>Every request goes to the workshop engine <code>{{ engine }}</code>, a LAMB
+           assistant that passes the students' requests through unchanged. It is set
+           for the whole tool on the admin page, not per activity.</p>
+      {% else %}
+        <p class="error">The tool has no workshop engine yet: ask the administrator to set
+           it on the tool's /admin page. Students cannot chat until then.</p>
+      {% endif %}
+      <label>What students are told about the model (shown before they start)
+        <textarea name="consent_model_note" rows="3"
+          placeholder="e.g. The model runs on the university's LAMB server (qwen3.5:9b through Ollama); messages are not sent to external companies.">{{ settings.consent_model_note }}</textarea>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Formative feedback rubric</h2>
+      <p class="muted">When a student submits, the engine reads their work and this rubric
+         and gives feedback per criterion. It is a suggestion for the student: it never
+         reaches the gradebook. JSON in this shape:</p>
+      <pre class="muted">{{ rubric_shape }}</pre>
+      <textarea name="rubric" rows="18" spellcheck="false" style="font-family: monospace; width: 100%">{{ rubric_json }}</textarea>
+      <button type="button" id="rubric-default">Reset to the default rubric</button>
+    </section>
+
+    <section class="card">
+      <h2>Before the students</h2>
+      <label class="row">
+        <input type="checkbox" name="teacher_first" {{ 'checked' if settings.teacher_first else '' }}>
+        Students wait until I have tried the workshop myself and submitted it
+      </label>
+      <p class="muted">You can open the wizard from the dashboard (“Try the workshop
+         yourself”). Your own work is kept apart and is not in the student list.</p>
+    </section>
+
+    <section class="card">
+      <h2>Grades</h2>
+      <label class="row">
+        <input type="checkbox" name="grading_enabled"
+          {{ 'checked' if activity and activity['grading_enabled'] else '' }}>
+        Enable grade passback
+      </label>
+      <label>Answered messages for a proposed full completion score
+        <input type="number" name="min_turns" min="0"
+          value="{{ activity['min_turns'] if activity else 3 }}">
+      </label>
+    </section>
+
     <button type="submit">Save</button>
   </form>
-  <p class="muted">{{ models|length }} assistant(s) available with this tool's LAMB key.</p>
   <script>
+    // Header token, never the cookie: another launch in this browser may have
+    // replaced it (plan §0.1).
     const token = {{ session_token|tojson }};
+    const defaultRubric = {{ default_rubric_json|tojson }};
+    document.getElementById('rubric-default').onclick = () => {
+      document.querySelector('textarea[name=rubric]').value = defaultRubric;
+    };
     document.getElementById('setup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
       const res = await fetch('/setup', {
-        method: 'POST', body: fd, headers: { 'X-Session-Token': token },
+        method: 'POST', body: new FormData(e.target), credentials: 'omit',
+        headers: { 'X-Session-Token': token },
       });
       const data = await res.json();
-      if (data.ok) window.location = data.redirect;
+      const err = document.getElementById('setup-error');
+      if (data.ok) { window.location = data.redirect; return; }
+      err.textContent = data.error || 'Could not save.';
+      err.hidden = false;
+      window.scrollTo(0, 0);
     });
   </script>
 {% endblock %}

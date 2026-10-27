@@ -1,0 +1,14 @@
+# Versions the test suite last passed with (local venv, 2026-10-22). The
+# Docker build installs requirements.txt within these, so an image built
+# later gets the same framework, not whatever is newest that day (an unpinned
+# FastAPI is what broke the kb-server source build, plan §9 Phase 0).
+# Bump them together, after a test run.
+fastapi==0.159.1
+starlette==1.9.0
+uvicorn==0.54.0
+httpx==0.28.1
+jinja2==3.1.6
+python-multipart==0.0.32
+pydantic==2.14.1
+tiktoken==0.14.0
+markitdown==0.1.9

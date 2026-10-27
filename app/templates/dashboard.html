@@ -3,20 +3,24 @@
 {% block content %}
   <h1>{{ activity['title'] if activity else 'Activity' }}</h1>
   <p class="muted">Assistant: {{ activity['assistant_name'] if activity else '—' }}
-     · <a href="/setup?session={{ session_token }}">edit setup</a></p>
+     · <a href="/setup?session={{ session_token }}">edit setup</a>
+     · <a href="/workshop/?session={{ session_token }}">try the workshop yourself</a></p>
 
   <table class="roster">
     <thead>
-      <tr><th>Student</th><th>Turns</th><th>Proposed</th><th>Grade (0–10)</th><th>Feedback</th><th></th></tr>
+      <tr><th>Student</th><th>Answered messages</th><th>Submitted</th><th>Rubric (suggestion)</th>
+          <th>Proposed</th><th>Grade (0–10)</th><th>Feedback</th><th></th></tr>
     </thead>
     <tbody>
       {% for p in people %}
       <tr data-user="{{ p.user_id }}">
-        <td>{{ p.full_name or p.email or ('user ' ~ p.user_id) }}</td>
+        <td><a href="/dashboard/student/{{ p.user_id }}?session={{ session_token }}">{{ p.full_name or p.email or ('user ' ~ p.user_id) }}</a></td>
         <td>{{ p.user_turns }}</td>
+        <td>{{ p.submitted_at[:16].replace('T', ' ') if p.submitted_at else '—' }}</td>
+        <td>{{ p.suggested or '—' }}</td>
         <td>{{ '%.0f%%' % (p.proposed * 100) if p.proposed is not none else '—' }}</td>
         <td><input class="score" type="number" min="0" max="10" step="0.5"
-              value="{{ p.score if p.score is not none else '' }}"></td>
+              value="{{ '%g' % (p.score * 10) if p.score is not none else '' }}"></td>
         <td><input class="feedback" value="{{ p.feedback or '' }}"></td>
         <td>
           <button class="save">Save</button>
@@ -34,8 +38,25 @@
     <p class="muted">Grade passback is disabled for this activity.</p>
   {% endif %}
 
+  <section class="card">
+    <h2>Student data</h2>
+    <p class="muted">Delete what the workshop stored for every student of this activity
+       (their assistants, documents and their knowledge bases, conversations, reflections
+       and feedback). Grades already saved here stay.</p>
+    <button id="purge">Delete all student data of this activity</button>
+    <p id="purge-result" class="muted"></p>
+  </section>
+
   <script>
     const token = {{ session_token|tojson }};
+    document.getElementById('purge').addEventListener('click', async () => {
+      if (!confirm('Delete all student data of this activity? This cannot be undone.')) return;
+      const res = await fetch('/dashboard/purge', { method: 'POST', credentials: 'omit',
+                                                   headers: { 'X-Session-Token': token } });
+      const data = await res.json();
+      document.getElementById('purge-result').textContent =
+        `Deleted the data of ${data.students} student(s).`;
+    });
     const hdr = { 'X-Session-Token': token, 'Content-Type': 'application/json' };
 
     document.querySelectorAll('tr[data-user]').forEach(row => {
@@ -43,7 +64,7 @@
         const score = row.querySelector('.score').value;
         if (score === '') return;
         // dashboard shows a 0–10 grade; the LMS wants 0–1.
-        await fetch('/grades/set', { method: 'POST', headers: hdr, body: JSON.stringify({
+        await fetch('/grades/set', { method: 'POST', headers: hdr, credentials: 'omit', body: JSON.stringify({
           user_id: row.dataset.user,
           score: parseFloat(score) / 10.0,
           feedback: row.querySelector('.feedback').value,
@@ -54,7 +75,7 @@
 
     const sendAll = document.getElementById('send-all');
     if (sendAll) sendAll.addEventListener('click', async () => {
-      const res = await fetch('/grades/send', { method: 'POST', headers: hdr });
+      const res = await fetch('/grades/send', { method: 'POST', headers: hdr, credentials: 'omit' });
       const data = await res.json();
       document.getElementById('send-result').textContent =
         `Sent ${data.sent}. Failed ${data.failed.length}.`;

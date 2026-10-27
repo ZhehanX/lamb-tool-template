@@ -42,6 +42,21 @@
              placeholder="{{ 'unchanged — leave blank to keep' if settings.lti_secret_set else 'not set' }}">
     </label>
 
+    <h2>Workshop engine</h2>
+    <p class="muted">The LAMB assistant the workshop sends every request to: a
+       published assistant with an empty system prompt, an empty prompt
+       template and <code>no_rag</code>, so that what the panel shows is what
+       the model receives. Not the <code>debug-bypass</code> twin used by the
+       contract tests.</p>
+    <label>Engine assistant (model id)
+      <input name="engine_model" value="{{ settings.engine_model }}"
+             placeholder="lamb_assistant.2">
+    </label>
+    <label>Engine context window (tokens)
+      <input name="engine_context_tokens" value="{{ settings.engine_context_tokens }}"
+             placeholder="32768">
+    </label>
+
     <button type="submit">Save</button>
   </form>
 {% endblock %}

@@ -105,6 +105,167 @@ CREATE TABLE IF NOT EXISTS grades (
 );
 """
 
+# Schema changes after the template's base schema, as numbered migrations.
+# PRAGMA user_version records the last one applied; each runs once, inside a
+# transaction, so pilot data survives upgrades of the tool. Never edit an
+# applied migration: add the next number.
+_MIGRATIONS = {
+    1: """
+-- AI Workshop: the student's assistant (wizard steps 1, 2 and 4). The
+-- document is stored as the text extracted from the upload, not the file.
+CREATE TABLE IF NOT EXISTS student_assistant (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    instructions TEXT NOT NULL DEFAULT '',
+    document_name TEXT,
+    document_text TEXT,
+    document_bytes INTEGER,
+    retrieval_enabled INTEGER NOT NULL DEFAULT 0,
+    tools TEXT NOT NULL DEFAULT '[]',
+    current_step INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, resource_link_id, consumer_guid)
+);
+
+-- What the tool sent to LAMB and why: the assembler trace, as JSON. Kinds:
+-- a chat turn, a step-3 retrieval probe, a formative-feedback run.
+CREATE TABLE IF NOT EXISTS traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL CHECK (kind IN ('chat', 'probe', 'feedback')),
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- One exchange of the wizard chat. A failed call is kept as status 'error'
+-- and never becomes history the model sees again.
+CREATE TABLE IF NOT EXISTS turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    user_content TEXT NOT NULL,
+    assistant_content TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'ok', 'error')),
+    error TEXT,
+    rag_mode TEXT NOT NULL DEFAULT 'off' CHECK (rag_mode IN ('on', 'off')),
+    model TEXT,
+    trace_id INTEGER REFERENCES traces(id),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_turns_thread
+    ON turns (user_id, resource_link_id, consumer_guid, id);
+
+-- Step 6: the student's answers to the reflection prompts (JSON).
+CREATE TABLE IF NOT EXISTS reflections (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    submitted_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, resource_link_id, consumer_guid)
+);
+
+-- Formative feedback from the engine, with the rubric it used. A suggestion
+-- for the student only: never written to the gradebook.
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    rubric TEXT NOT NULL,
+    content TEXT NOT NULL,
+    model TEXT,
+    trace_id INTEGER REFERENCES traces(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS consent (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL,
+    accepted INTEGER NOT NULL,
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, resource_link_id, consumer_guid)
+);
+
+-- Per-activity workshop settings. The engine assistant is NOT here: it is a
+-- deployment setting on /admin (plan T13).
+CREATE TABLE IF NOT EXISTS activity_settings (
+    resource_link_id TEXT NOT NULL,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    rubric TEXT NOT NULL DEFAULT '{}',
+    steps_enabled TEXT NOT NULL DEFAULT '[1, 2, 3, 4, 5, 6]',
+    teacher_first INTEGER NOT NULL DEFAULT 0,
+    consent_model_note TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (resource_link_id, consumer_guid)
+);
+""",
+    2: """
+-- Collections in the tool's own kb-server (plan 8C, T10). The collection id
+-- is only ever read from here, never taken from a request (T9). One course
+-- collection per activity (user_id NULL); student collections would carry
+-- the user. The embedding model is fixed when a collection is created.
+CREATE TABLE IF NOT EXISTS kb_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    consumer_guid TEXT NOT NULL DEFAULT '',
+    resource_link_id TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('course', 'student')),
+    user_id INTEGER REFERENCES users(id),
+    collection_id INTEGER NOT NULL,
+    embedding TEXT NOT NULL DEFAULT '{}',
+    chunk_size INTEGER NOT NULL,
+    chunk_overlap INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+-- UNIQUE would let several NULL user_ids through: index each scope apart.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_course
+    ON kb_collections (consumer_guid, resource_link_id) WHERE scope = 'course';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_student
+    ON kb_collections (consumer_guid, resource_link_id, user_id) WHERE scope = 'student';
+""",
+    3: """
+-- "New conversation": each turn records the conversation it belongs to, and
+-- only the current conversation is sent as history. Earlier turns stay stored
+-- (and visible to the teacher). Without it the A/B comparison is not clean:
+-- asking the same question again with the knowledge base off, the model can
+-- read its earlier answer in the history.
+ALTER TABLE student_assistant ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE turns ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0;
+""",
+    4: """
+-- Step 3 searches the student's own step-2 document (plan T15), so there is
+-- no course knowledge base any more. kb_trash holds the kb-server collections
+-- still to delete: a replaced or removed document, a purged student, and the
+-- course collections of migration 2. A row goes once the kb-server confirms,
+-- so a removal made while it was down still happens (retention.empty_kb_trash).
+CREATE TABLE IF NOT EXISTS kb_trash (
+    collection_id INTEGER PRIMARY KEY,
+    retired_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO kb_trash (collection_id, retired_at)
+    SELECT collection_id, strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')
+    FROM kb_collections WHERE scope = 'course';
+DELETE FROM kb_collections WHERE scope = 'course';
+""",
+    5: """
+-- Tool rounds are history too (plan T16): later turns resend each round as
+-- the model wrote the call and as the result went back, then the model's last
+-- reply. assistant_content stays what the student saw (the text written
+-- before each call, then that last reply). Both NULL for a turn without
+-- tool calls, and for turns stored before this migration.
+ALTER TABLE turns ADD COLUMN tool_rounds TEXT;
+ALTER TABLE turns ADD COLUMN last_reply TEXT;
+""",
+}
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -127,6 +288,24 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(_SCHEMA)
+        migrate(conn)
+
+
+def migrate(conn, migrations: dict[int, str] = _MIGRATIONS) -> int:
+    """Apply the migrations newer than PRAGMA user_version; return the
+    resulting version."""
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    for version in sorted(v for v in migrations if v > current):
+        # executescript commits first and adds no transaction of its own, so
+        # the migration and its version bump commit together or not at all.
+        try:
+            conn.executescript(
+                f"BEGIN;\n{migrations[version]}\nPRAGMA user_version = {int(version)};\nCOMMIT;")
+        except Exception:
+            conn.rollback()
+            raise
+        current = version
+    return current
 
 
 # --- users -------------------------------------------------------------------
@@ -269,17 +448,28 @@ def get_messages(user_id: int, resource_link_id: str, consumer_guid: str, limit:
 # --- grades + participant roster ------------------------------------------------
 
 def participants(resource_link_id: str, consumer_guid: str):
-    """Roster for the instructor dashboard: everyone who launched, their turn
-    count, and their grade row if any."""
+    """Roster for the instructor dashboard: everyone who launched as a
+    student (teachers are not enrolled, so a teacher's own trial run is not
+    listed), their answered workshop messages, submission, latest formative
+    feedback, and their grade row if any."""
     with get_conn() as conn:
         return conn.execute(
             """SELECT u.id AS user_id, u.full_name, u.email,
                       e.lis_result_sourcedid,
-                      (SELECT COUNT(*) FROM messages m
-                        WHERE m.user_id = u.id
-                          AND m.resource_link_id = e.resource_link_id
-                          AND m.consumer_guid = e.consumer_guid
-                          AND m.role = 'user') AS user_turns,
+                      (SELECT COUNT(*) FROM turns t
+                        WHERE t.user_id = u.id
+                          AND t.resource_link_id = e.resource_link_id
+                          AND t.consumer_guid = e.consumer_guid
+                          AND t.status = 'ok') AS user_turns,
+                      (SELECT r.submitted_at FROM reflections r
+                        WHERE r.user_id = u.id
+                          AND r.resource_link_id = e.resource_link_id
+                          AND r.consumer_guid = e.consumer_guid) AS submitted_at,
+                      (SELECT f.content FROM feedback f
+                        WHERE f.user_id = u.id
+                          AND f.resource_link_id = e.resource_link_id
+                          AND f.consumer_guid = e.consumer_guid
+                        ORDER BY f.id DESC LIMIT 1) AS feedback_json,
                       g.proposed_score, g.score, g.feedback, g.sent_to_lms, g.sent_at
                FROM enrollments e
                JOIN users u ON u.id = e.user_id

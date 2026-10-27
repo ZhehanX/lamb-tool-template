@@ -82,6 +82,17 @@ async def save_settings(request: Request):
         if value:
             settings_store.set_value(key, value)
 
+    # Workshop engine (plan T13): the engine assistant and its context size.
+    engine = (form.get("engine_model") or "").strip()
+    if engine:
+        settings_store.set_value("engine_model", engine)
+    context = (form.get("engine_context_tokens") or "").strip()
+    if context:
+        if not context.isdigit() or not 2048 <= int(context) <= 1_000_000:
+            return JSONResponse({"error": "engine_context_tokens must be a number of tokens "
+                                          "between 2048 and 1000000"}, status_code=400)
+        settings_store.set_value("engine_context_tokens", context)
+
     # Secret values: update only when a new value is provided; a blank field
     # means "keep the current secret".
     for key in ("lamb_api_key", "lti_secret"):

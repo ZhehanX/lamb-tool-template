@@ -6,6 +6,11 @@ Four keys, set by the admin:
   lti_consumer_key — must match the LMS External Tool config
   lti_secret      — shared secret, must match the LMS External Tool config
 
+Two more keys belong to the AI Workshop and are optional for launches:
+  engine_model          — the LAMB engine assistant ("lamb_assistant.<id>"), an
+                          empty pass-through assistant (plan T1, T13)
+  engine_context_tokens — how many tokens that model can read (plan T14)
+
 Secrets (lamb_api_key, lti_secret) are stored as-is in the local SQLite
 file — the same trust level as the .env would have been. They are never
 sent to the browser (the admin form shows only whether they are set)."""
@@ -16,6 +21,7 @@ from .db import get_conn
 
 RUNTIME_KEYS = ("lamb_api_base", "lamb_api_key", "lti_consumer_key", "lti_secret")
 SECRET_KEYS = ("lamb_api_key", "lti_secret")
+WORKSHOP_KEYS = ("engine_model", "engine_context_tokens")
 
 # Runtime key -> environment variable used to pre-seed it on first boot.
 _ENV_SEED = {
@@ -51,7 +57,7 @@ def public_view() -> dict:
     """What the admin form may see: plain values for non-secrets, and a
     boolean 'configured' flag for secrets (never the secret itself)."""
     view = {}
-    for key in RUNTIME_KEYS:
+    for key in RUNTIME_KEYS + WORKSHOP_KEYS:
         value = get(key)
         if key in SECRET_KEYS:
             view[key + "_set"] = bool(value)

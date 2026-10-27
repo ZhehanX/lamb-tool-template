@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ person.full_name or 'Student' }} — workshop{% endblock %}
+{% block content %}
+  <h1>{{ person.full_name or person.email or ('user ' ~ person.user_id) }}</h1>
+  <p class="muted"><a href="/dashboard?session={{ session_token }}">← back to the dashboard</a>
+     · {{ person.user_turns }} answered message(s)
+     · {{ 'submitted ' ~ person.submitted_at[:16].replace('T', ' ') if person.submitted_at else 'not submitted' }}</p>
+
+  <section class="card">
+    <h2>Formative feedback (a suggestion for the student, never sent to the gradebook)</h2>
+    {% if not feedback %}
+      <p class="muted">None yet.</p>
+    {% elif feedback.status != 'completed' %}
+      <p class="error">Could not be generated: {{ feedback.error_message }}</p>
+    {% else %}
+      {% if feedback.total_score is not none %}
+        <p>Suggested score: <strong>{{ '%g' % feedback.total_score }}</strong> / {{ '%g' % feedback.max_score }}</p>
+      {% endif %}
+      <ul>
+        {% for c in feedback.criteria %}
+          <li><strong>{{ c.criterion }}</strong>{% if c.level %} — {{ c.level }}{% endif %}{% if c.score is not none %} ({{ '%g' % c.score }}){% endif %}: {{ c.feedback or '' }}</li>
+        {% endfor %}
+      </ul>
+      {% if feedback.overall_feedback %}<p>{{ feedback.overall_feedback }}</p>{% endif %}
+      {% if feedback.error_message %}<p class="muted">{{ feedback.error_message }}</p>{% endif %}
+      <p class="muted">Model: {{ feedback.model or '—' }} · {{ feedback.created_at }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>The work, as the feedback reads it</h2>
+    <pre style="white-space: pre-wrap">{{ transcript }}</pre>
+  </section>
+{% endblock %}
