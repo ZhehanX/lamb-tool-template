@@ -1,3 +1,73 @@
+# taller-ia
+
+The AI Workshop as a standalone LTI 1.1 tool built on
+[lamb-tool-template](https://github.com/Lamb-Project/lamb-tool-template).
+Students build their own assistant in a guided wizard, and an observability
+panel shows exactly what the model receives. LAMB is used only as a
+transparent engine: one published assistant with an empty system prompt, an
+empty prompt template and `no_rag`, reached with a personal creator API key.
+The tool assembles the whole context itself.
+
+### Version pairing
+
+The tool relies on LAMB behaviour that is not a published contract (an empty
+assistant passes messages through unchanged), so versions are pinned and
+`LAMB_CONTRACT=1` tests guard the pairing.
+
+| Component | Version |
+|---|---|
+| lamb-tool-template | `4ad73dc` |
+| LAMB | `874f5cd` (upstream `dev` = 0.8) |
+| lamb-kb-server (Phase 8) | `ghcr.io/lamb-project/lamb-kb:v0.7@sha256:5773572f3365a317aaa38fae5831f7d53464979fc5ed129e8c8949d373a25324` (same `lamb-kb-server-stable/` tree as `874f5cd`) |
+| mock LMS (lamb-lti-test-tool) | `1cacfac` |
+
+### Development
+
+The whole tool side runs in Docker: `docker-compose.dev.yaml` on top of the
+deployment file.
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --build
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --build tool   # after a code change
+```
+
+| Service | Where | Notes |
+|---|---|---|
+| `tool` (this tool, wizard SPA included) | :8090 | SQLite in the `tool-data` volume (WAL is unreliable on a Windows bind mount) |
+| `kb` (own lamb-kb-server) | 127.0.0.1:9190 | the tool itself uses `http://kb:9090` |
+| `lms` (mock LMS, lamb-lti-test-tool) | internal :8000 | built from `../lamb-lti-test-tool`; its database stays the file in that checkout |
+| `lms-gateway` (nginx) | :8001 | the browser's way in to `lms`; sends `Host: lms:8000`, so the grade URL the mock LMS hands the tool is `http://lms:8000/outcomes` |
+| LAMB 0.8 | :9099 | a separate checkout of `874f5cd` with its own compose project; the LAMB base on `/admin` is `http://host.docker.internal:9099` |
+| Ollama | :11434 | native on the host (GPU), shared with LAMB |
+
+`npm run dev` in `frontend/` still serves the SPA on :5173 against the tool on
+:8090. The Docker build installs `requirements.txt` within `constraints.txt`,
+the versions the tests last passed with.
+
+`.env` beyond the template's: `KB_SERVER_URL`, `KB_SERVER_TOKEN` (never name
+it `LAMB_API_KEY` here: that pre-seeds the LAMB key), and optionally
+`WORKSHOP_TOOL_CALL_STYLE` (`tag` | `qwen`) and `WORKSHOP_RETENTION_DAYS`
+(automatic deletion is off without it). The engine assistant and its context
+window are set on `/admin`.
+
+Tests:
+
+```bash
+pytest                                   # unit tests, no services needed
+LAMB_CONTRACT=1 LAMB_CONTRACT_KEY=... LAMB_CONTRACT_DEBUG_MODEL=lamb_assistant.<debug id> \
+KB_CONTRACT=1 KB_SERVER_URL=... KB_SERVER_TOKEN=... pytest tests/contract
+cd frontend && npx vitest run
+python tests/e2e_workshop.py             # browser end to end, all services up
+python tests/e2e_document_kb.py          # (see each file's docstring for its env)
+# the e2e scripts replace the tool's course link in the mock LMS on every run
+python scripts/tool_compliance.py        # tool-call format compliance of the engine model
+python scripts/compare_embeddings.py DIR # which embedding model finds the right excerpts
+```
+
+The rest of this README is the template's own documentation.
+
+---
+
 # lamb-tool-template
 
 A minimal, well-built starting point for an educational tool that:
