@@ -67,7 +67,7 @@ def main():
         page.goto(f"{LMS}/launch/{ct_id}?user_id={TEACHER_UID}")
         page.wait_for_url("**localhost:8090/setup**", timeout=20000)
         page.wait_for_selector("select[name=assistant_model]")
-        page.select_option("select[name=assistant_model]", assistant_id)
+        # taller-ia: no assistant to pick; the engine is set on /admin (T13).
         page.fill("input[name=title]", "AI Study Coach")
         if page.query_selector("input[name=grading_enabled]"):
             page.check("input[name=grading_enabled]")

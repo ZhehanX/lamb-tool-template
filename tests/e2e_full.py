@@ -16,26 +16,33 @@ Prereqs (all on the host):
   - this tool up on :8090, configured with the LTI creds below
 
 Run:  .venv/bin/python tests/e2e_full.py
+
+The constants below can be overridden from the environment (E2E_LMS_DB,
+E2E_LAMB_KEY, LTI_CONSUMER_KEY, LTI_SECRET, E2E_SHOTS, E2E_ASSISTANT), so
+the test also runs on a dev box that is not laid out like the one above.
+E2E_ASSISTANT pins the assistant instead of probing /v1/models.
 """
 
+import os
 import sqlite3
 import sys
+import tempfile
 
 import httpx
 from playwright.sync_api import sync_playwright
 
 LMS = "http://localhost:8001"
 TOOL = "http://localhost:8090"
-LMS_DB = "/opt/lamb-lti-test-tool/lti_platform.db"
+LMS_DB = os.getenv("E2E_LMS_DB", "/opt/lamb-lti-test-tool/lti_platform.db")
 LAMB_BASE = "http://localhost:9099"
-LAMB_KEY = "0p3n-w3bu!"
+LAMB_KEY = os.getenv("E2E_LAMB_KEY", "0p3n-w3bu!")
 
-CONSUMER_KEY = "lamb-tool-key"
-CONSUMER_SECRET = "lamb-tool-secret-2026"
+CONSUMER_KEY = os.getenv("LTI_CONSUMER_KEY", "lamb-tool-key")
+CONSUMER_SECRET = os.getenv("LTI_SECRET", "lamb-tool-secret-2026")
 COURSE_ID = 1
 TEACHER_UID = 1   # Dr. Alice Smith (role=teacher -> Instructor)
 STUDENT_UID = 3   # Charlie Brown  (role=student -> Learner)
-SHOTS = "/tmp/e2e"
+SHOTS = os.getenv("E2E_SHOTS", os.path.join(tempfile.gettempdir(), "e2e"))
 
 results = []
 
@@ -91,6 +98,9 @@ def ensure_registered():
 # --- phase 2: find a LAMB assistant that actually answers --------------------
 
 def working_assistant():
+    pinned = os.getenv("E2E_ASSISTANT")
+    if pinned:
+        return pinned, "(pinned by E2E_ASSISTANT)"
     data = httpx.get(f"{LAMB_BASE}/v1/models",
                      headers={"Authorization": f"Bearer {LAMB_KEY}"}, timeout=30).json()["data"]
     # Prefer text assistants — image-generation assistants answer a text
@@ -137,8 +147,8 @@ def main():
         check("instructor lands on tool", "localhost:8090" in page.url, page.url)
         check("instructor -> setup", "/setup" in page.url)
 
-        page.wait_for_selector("select[name=assistant_model]")
-        page.select_option("select[name=assistant_model]", assistant_id)
+        page.wait_for_selector("input[name=title]")
+        # taller-ia: no assistant to pick; the engine is set on /admin (T13).
         page.fill("input[name=title]", "E2E Chat Activity")
         if page.query_selector("input[name=grading_enabled]"):
             page.check("input[name=grading_enabled]")
@@ -151,7 +161,11 @@ def main():
         sp = ctx.new_page()
         sp.goto(launch_url(ct_id, STUDENT_UID))
         sp.wait_for_url("**localhost:8090/**", timeout=20000)
-        check("student -> chat", "/chat" in sp.url, sp.url)
+        # taller-ia: students land in the workshop wizard (tests/e2e_workshop.py
+        # covers it). The template's chat page still exists and feeds the
+        # template roster and grades, so the grade round-trip goes through it.
+        check("student -> workshop", "/workshop/?session=" in sp.url, sp.url)
+        sp.goto(sp.url.replace("/workshop/?", "/chat?"))
 
         sp.wait_for_selector("#msg")
         sp.fill("#msg", "Hello! In one short sentence, what can you help me with?")
@@ -189,6 +203,15 @@ def main():
         if target:
             target.query_selector(".score").fill("8")
             target.query_selector(".feedback").fill("Good engagement (e2e).")
+            target.query_selector("button.save").click()
+            page.wait_for_timeout(600)
+            # Save -> reload -> save again must keep 8/10 (the template used to
+            # show the stored 0-1 value and divide it by ten once more).
+            page.reload()
+            page.wait_for_selector("tr[data-user]")
+            target = [r for r in page.query_selector_all("tr[data-user]") if "Charlie" in r.inner_text()][0]
+            shown = target.query_selector(".score").input_value()
+            check("reloaded grade still reads 8", shown == "8", shown)
             target.query_selector("button.save").click()
             page.wait_for_timeout(600)
             page.click("#send-all")
