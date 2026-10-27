@@ -6,6 +6,47 @@ services:
     env_file: .env
     environment:
       - TOOL_DB_PATH=/srv/tool/data/tool.db
+      - KB_SERVER_URL=http://kb:9090
+    # LAMB normally runs elsewhere; when it runs on this same host, set the
+    # LAMB base on /admin to http://host.docker.internal:9099.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/srv/tool/data
     restart: unless-stopped
+    depends_on:
+      - kb
+
+  # The tool's own lamb-kb-server (plan T8/T9): each student's step-2 document,
+  # searched in step 3 (T15). Same source tree as LAMB 874f5cd's lamb-kb-server-stable/; pinned
+  # by digest, never :latest. Building it from source today pulls a FastAPI
+  # that breaks it at import (plan §9, Phase 0).
+  kb:
+    image: ghcr.io/lamb-project/lamb-kb:v0.7@sha256:5773572f3365a317aaa38fae5831f7d53464979fc5ed129e8c8949d373a25324
+    restart: unless-stopped
+    environment:
+      PORT: "9090"
+      KB_CONFIG_PATH: /app/backend/data/config.json
+      # Chunk metadata carries <HOME_URL>/static/... links to the uploaded
+      # originals. /static is unauthenticated: keep this address internal and
+      # never hand those links to a browser.
+      HOME_URL: ${KB_HOME_URL:-http://kb:9090}
+      # The kb-server calls its single shared token LAMB_API_KEY. It is set
+      # here only: in the tool's .env that name would pre-seed the LAMB key.
+      LAMB_API_KEY: ${KB_SERVER_TOKEN:?set KB_SERVER_TOKEN in .env}
+      EMBEDDINGS_VENDOR: ${KB_EMBEDDINGS_VENDOR:-ollama}
+      # bge-m3: 10/10 correct excerpts in the top 3 on Catalan and Spanish test
+      # questions, against 2/10 for nomic-embed-text (plan §9, Phase 8).
+      EMBEDDINGS_MODEL: ${KB_EMBEDDINGS_MODEL:-bge-m3}
+      EMBEDDINGS_ENDPOINT: ${KB_EMBEDDINGS_ENDPOINT:-http://host.docker.internal:11434}
+      EMBEDDINGS_APIKEY: ${KB_EMBEDDINGS_APIKEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - kb-data:/app/backend/data
+      - kb-static:/app/backend/static
+    # No ports: only the tool talks to it (T9). See docker-compose.dev.yaml.
+
+volumes:
+  kb-data:
+  kb-static:

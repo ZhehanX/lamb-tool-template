@@ -1,0 +1,68 @@
+# Development on this Windows machine: the whole tool side runs in Docker.
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --build
+# LAMB 0.8 is a separate compose project (../lamb-08) reached through the host
+# on :9099, so the LAMB base on /admin is http://host.docker.internal:9099.
+# Ollama runs natively on the host (:11434, GPU), shared with LAMB.
+services:
+  tool:
+    # 8090, not 8080: LAMB's Open WebUI has 8080 on this machine. !override
+    # replaces the base mapping instead of adding to it.
+    ports: !override
+      - "8090:8080"
+    volumes:
+      # A named volume instead of ./data: the tool's SQLite runs in WAL mode,
+      # which is unreliable on a Windows bind mount.
+      - tool-data:/srv/tool/data
+
+  # Published on loopback only, on 9190 to keep clear of LAMB's own kb on
+  # 9090, for the host-side contract tests and scripts (KB_CONTRACT=1,
+  # scripts/compare_embeddings.py). The tool itself uses http://kb:9090.
+  kb:
+    ports:
+      - "127.0.0.1:9190:9090"
+
+  # The mock LMS (lamb-lti-test-tool 1cacfac, unmodified). Its database stays
+  # the file in that checkout, so registrations, launches and grades carry
+  # over and tests/e2e_full.py can still read it (E2E_LMS_DB).
+  lms:
+    build: ../lamb-lti-test-tool
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../lamb-lti-test-tool/lti_platform.db:/app/lti_platform.db
+    restart: unless-stopped
+
+  # The browser reaches the mock LMS here, on :8001. The mock LMS builds its
+  # grade-passback URL from the Host header; with the browser's Host that is
+  # http://localhost:8001/outcomes, which inside the tool container is the
+  # container itself. Rewriting Host to lms:8000 makes it hand the tool
+  # http://lms:8000/outcomes instead. Its other links and redirects are
+  # relative, so the browser stays on localhost:8001.
+  lms-gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8001:8001"
+    configs:
+      - source: lms-gateway
+        target: /etc/nginx/conf.d/default.conf
+    depends_on:
+      - lms
+    restart: unless-stopped
+
+configs:
+  lms-gateway:
+    content: |
+      server {
+        listen 8001;
+        # Docker's DNS, re-resolved so a recreated lms container is found.
+        resolver 127.0.0.11 valid=10s;
+        set $$lms http://lms:8000;
+        location / {
+          proxy_pass $$lms;
+          proxy_set_header Host lms:8000;
+          proxy_set_header X-Forwarded-For $$remote_addr;
+        }
+      }
+
+volumes:
+  tool-data:
