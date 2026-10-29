@@ -81,6 +81,9 @@ export function createWorkshopFormState(state = {}) {
 		// Step 5: A/B experiment, excerpts only (on) vs the whole document (off) (D3)
 		/** @type {'on' | 'off'} */
 		ragMode: 'on',
+		// Step 5: how many tokens the model may read, an experiment (T18); null for all
+		/** @type {number | null} */
+		inputCap: null,
 		/** Successful chat turns so far (the step is done after one). */
 		turnsOk: (state.turns || []).filter((/** @type {any} */ t) => t.status === 'ok').length,
 

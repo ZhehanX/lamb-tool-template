@@ -74,14 +74,20 @@ class Budget:
 
     LAMB sends no num_ctx and reports no usage, so the limit is configured
     (32768 = OLLAMA_CONTEXT_LENGTH in dev), a share is kept free because the
-    count is an estimate, and room is left for the answer, thinking included."""
+    count is an estimate, and room is left for the answer, thinking included.
+
+    `input_cap` is the student's step-5 experiment (T18): it caps the input
+    directly, so the room for the answer stays what the real model needs, and
+    it can only lower the limit."""
     context_tokens: int = 32768
     reserve_output: int = 3072
     margin: float = 0.15
+    input_cap: int | None = None
 
     @property
     def input_limit(self) -> int:
-        return int(self.context_tokens * (1 - self.margin)) - self.reserve_output
+        limit = int(self.context_tokens * (1 - self.margin)) - self.reserve_output
+        return min(limit, self.input_cap) if self.input_cap else limit
 
 
 @dataclass

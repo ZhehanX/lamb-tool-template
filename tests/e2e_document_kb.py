@@ -127,8 +127,15 @@ def main():
         next_step(page, 4)
         next_step(page, 5)
 
+        def show(view):
+            """The chat card shows the chat or, once there is a run, the comparison (T17)."""
+            tab = page.get_by_test_id(f"{view}-tab")
+            if tab.count():
+                tab.click()
+
         def ask(mode):
             """Send QUESTION in a mode; return the request as the panel shows it."""
+            show("chat")
             page.get_by_test_id(f"rag-mode-{mode}").click()
             answers = page.locator('[data-testid="chat-assistant"]').count()
             page.fill('[data-testid="chat-input"]', QUESTION)
@@ -155,6 +162,7 @@ def main():
               "deu dies" in sent["messages"][0]["content"] and sent["messages"][-1]["content"] == QUESTION)
         check("same conversation: the 'off' request carries the 'on' answer as history",
               [m["role"] for m in sent["messages"]] == ["system", "user", "assistant", "user"])
+        show("compare")
         page.wait_for_selector('[data-testid="comparison-same-conversation"]', timeout=10000)
         check("comparison: it warns that the runs share a conversation", True)
 
@@ -164,6 +172,8 @@ def main():
         sent = ask("off")
         check("new conversation: the 'off' request has no earlier messages",
               [m["role"] for m in sent["messages"]] == ["system", "user"])
+        show("compare")
+        page.wait_for_selector('[data-testid="comparison-on"]', timeout=10000)
         check("comparison: no warning once the runs are in different conversations",
               page.locator('[data-testid="comparison-same-conversation"]').count() == 0)
         on = page.inner_text('[data-testid="comparison-on"]')

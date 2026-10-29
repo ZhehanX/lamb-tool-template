@@ -92,9 +92,32 @@ def engine_model() -> str:
     return model
 
 
-def budget() -> Budget:
+# Step 5's experiment (T18): the student lets the model read fewer tokens,
+# so the budget's cuts (T14) happen to their own material.
+INPUT_CAPS = (8000, 4000, 2000)
+
+
+def budget(input_cap: int | None = None) -> Budget:
     value = settings_store.get("engine_context_tokens")
-    return Budget(context_tokens=int(value) if value else DEFAULT_CONTEXT_TOKENS)
+    b = Budget(context_tokens=int(value) if value else DEFAULT_CONTEXT_TOKENS)
+    # Only a listed cap, and only below the real limit: the trace then never
+    # claims a cap that changed nothing (T18).
+    if input_cap in INPUT_CAPS and input_cap < b.input_limit:
+        b.input_cap = input_cap
+    return b
+
+
+def input_caps() -> list[int]:
+    """The caps step 5 offers: those that lower this deployment's limit."""
+    limit = budget().input_limit
+    return [c for c in INPUT_CAPS if c < limit]
+
+
+def overflow_hint(e: ContextOverflow) -> str:
+    """Point at the step-5 cap when that is the limit the request ran into."""
+    if e.limit < budget().input_limit:
+        return "You chose to let the model read less in step 5: choose a higher limit there."
+    return ""
 
 
 def counter() -> TokenCounter:
@@ -261,10 +284,13 @@ def turn_view(t) -> dict:
             "status": t["status"], "error": t["error"], "rag_mode": t["rag_mode"],
             "model": t["model"], "trace_id": t["trace_id"], "created_at": t["created_at"],
             "retrieved": t["retrieved"] if "retrieved" in t.keys() else 0,
+            "tokens": t["tokens"] if "tokens" in t.keys() else None,
+            "tool_calls": t["tool_calls"] if "tool_calls" in t.keys() else 0,
             "conversation": t["conversation"]}
 
 
-def preview(session, user_input: str, rag_mode: str = "off") -> dict:
+def preview(session, user_input: str, rag_mode: str = "off",
+            input_cap: int | None = None) -> dict:
     """The request the next message would make, without calling LAMB, so
     steps 1-4 can show what the assistant receives as it is being built."""
     uid, rlid, guid = scope(session)
@@ -273,7 +299,7 @@ def preview(session, user_input: str, rag_mode: str = "off") -> dict:
     config, rag_mode, _ = _design(store.get_assistant(uid, rlid, guid),
                                   retriever(uid, rlid, guid), rag_mode)
     messages, trace = build(config, store.history(uid, rlid, guid), user_input,
-                            budget=budget(), counter=counter())
+                            budget=budget(input_cap), counter=counter())
     model = settings_store.get("engine_model") or "(engine not configured)"
     trace.payload = lamb_client.make_payload(model, messages, stream=True)
     return frames.observability(trace, phase="preview", rag_mode=rag_mode)
@@ -282,7 +308,7 @@ def preview(session, user_input: str, rag_mode: str = "off") -> dict:
 class _Turn:
     """Everything one chat turn needs to assemble each of its requests."""
 
-    def __init__(self, session, message: str, rag_mode: str):
+    def __init__(self, session, message: str, rag_mode: str, input_cap: int | None = None):
         uid, rlid, guid = scope(session)
         self.scope = (uid, rlid, guid)
         self.model = engine_model()
@@ -301,7 +327,7 @@ class _Turn:
                 raise NotReady(f"Your document's knowledge base is not available: {e}") from e
             self.retrieval = self.kb.last
         self.rounds: list[ToolRound] = []
-        self.budget, self.counter = budget(), counter()
+        self.budget, self.counter = budget(input_cap), counter()
 
     def request(self):
         messages, trace = build(self.config, self.history, self.message,
@@ -313,13 +339,13 @@ class _Turn:
         return trace
 
 
-def start_chat(session, message: str, rag_mode: str):
+def start_chat(session, message: str, rag_mode: str, input_cap: int | None = None):
     """Validate and assemble the first request; return the SSE generator.
 
     Raises NotReady or ContextOverflow before anything is streamed, so the
     route can answer with a plain HTTP error."""
     check_rate(*scope(session))
-    turn = _Turn(session, message, rag_mode)
+    turn = _Turn(session, message, rag_mode, input_cap)
     trace = turn.request()
     turn_id = store.start_turn(*turn.scope, message, turn.rag_mode)
     return _chat_stream(turn, turn_id, trace)
@@ -434,7 +460,9 @@ def _chat_stream(turn: _Turn, turn_id: int, trace):
         finished = True
         yield frames.sse(frames.error(
             "The tool results made the request longer than the model can read.",
-            "context_overflow", f"About {e.needed} tokens; the limit is {e.limit}."))
+            "context_overflow",
+            " ".join(filter(None, [f"About {e.needed} tokens; the limit is {e.limit}.",
+                                   overflow_hint(e)]))))
     finally:
         if not finished:
             # The student pressed Stop (the client went away) or the server

@@ -6,7 +6,7 @@ used here; read the entry before changing code that cites it.
 
 | ID in the code | Where it is here |
 |---|---|
-| `T1`–`T16` | [This tool's decisions](#this-tools-decisions) |
+| `T1`–`T18` | [This tool's decisions](#this-tools-decisions) |
 | `8A`, `8B`, `8C` | The retrieval options, under [T8](#t8--retrieval-runs-in-the-tools-own-lamb-kb-server) |
 | `D1`–`D7`, `C6`–`C20` | [Carried over from the old branch](#carried-over-from-the-old-branch) |
 | `plan §0.1`, `§1`, `§8` | [External facts](#external-facts) |
@@ -289,6 +289,79 @@ later turns do not know what was already computed, and the history shows
 numbers given with no call behind them, which is a bad example for the
 model. Cost: more tokens per turn, hence the elision order in T14.
 
+### T17 — The panel is grouped by source, and every message has a receipt
+
+The author's decision, 2026-10-27.
+
+The panel used to list the request message by message, with the chat below
+it. Each turn added two more messages to the list, so after a few turns the
+student scrolled past the whole panel to reach the chat input. Now:
+
+- Wizard, chat and panel sit side by side. Each scrolls on its own, inside
+  one shared height (they stack on a narrow screen).
+- The panel's header stays in place: which request it shows, the budget
+  (T14) and a bar of what the request is made of. When earlier messages
+  pass 40% of it, the header says that a new conversation would clear them.
+- The body has one row per kind of content, in the order the model reads
+  it (`contextRows`): instructions, document and tools (the system
+  message), then all earlier messages as **one** row split into turns,
+  then the excerpts, the student's message and this turn's tool rounds.
+  The workshop's own text (`scaffold`) goes with the part it introduces.
+  Every segment is still shown, so nothing sent is hidden (T3). Rows are
+  `<details>`, one open at a time; the step's own row opens by itself
+  (instructions in step 1, document in step 2, tools in step 4).
+- Under each of the student's messages, a receipt ("What was sent · about
+  N tokens · 3 excerpts · 2 tool calls") opens that request in the panel.
+  A message sent in this page keeps its frame; an older one loads its trace
+  (`GET /traces/{id}`, `frameFromTrace`). `GET /state` gives each turn's
+  `tokens` and `tool_calls` for the receipt. The tool calls counted are the
+  message's own (`tools` segments tagged `tool_round: call` in its last
+  request), not the ones resent with the history, so the count matches the
+  panel's "Tool calls and results" row. Sending a message goes back to the
+  latest request.
+- The A/B comparison (D3) is a tab of the chat card instead of a card of
+  its own.
+
+Why: the panel's length no longer depends on the conversation, and the
+chat input stays on screen. Grouping by source also shows more plainly
+what a request is made of; the raw JSON is still one click away.
+
+### T18 — Step 5 can let the model read less
+
+The author's decision, 2026-10-27.
+
+Step 5 offers "Tokens the model can read": all (the T14 limit, 24780 by
+default), 8000, 4000 or 2000. A cap sets the input limit directly
+(`Budget.input_cap`); the reserve for the answer stays, because the real
+model still thinks. The tool really cuts the request to it, in T14's order,
+so the panel still shows what was sent and the model never sees what was
+left out.
+
+- `/preview` and `/chat` take `input_cap`, as they take `rag_mode`. The
+  server keeps only a listed value below the real limit and ignores
+  anything else, so a cap can only lower the limit, and the engine's size
+  stays a deployment setting (T13). `/state` lists the caps that apply.
+- The cap is recorded in each trace's `budget`, so a receipt (T17) shows
+  the cap its request ran under, and the panel's header says the limit is
+  an experiment, not the model's size.
+- It is page state, like the A/B switch: a reload goes back to all. It
+  applies to the previews of every step, so the panel stays true to what
+  the next message would send.
+- When the cap is what a request ran into, the 413 (and a tool round's
+  overflow) adds a hint pointing at step 5.
+- 2000 is the smallest cap: the tool instructions take about 150 tokens,
+  and a `kb_search` round about 850.
+
+Why: without it, the budget's cuts were built (T14, T16) but almost never
+seen. They take a document of 30–40 pages, or dozens of turns at six
+messages a minute. Filling the context instead (long sample documents,
+filler turns) was rejected: each turn would resend about 25k tokens, which
+takes 16–19 s or more on the development model and queues a class on one
+Ollama; filler would be stored as the student's work, and what got cut
+would be the filler, not their own material. With a cap the requests get
+smaller, and a few pages are enough to see the document cut, and then, with
+the knowledge base on, retrieval finding the part that was cut (T15).
+
 ---
 
 ## Carried over from the old branch
@@ -486,6 +559,7 @@ What was built in each phase of the migration plan (cited as
 | 7 | 2026-10-22 | Formative feedback, teacher setup and dashboard, teacher first, consent, retention, rate limits |
 | 8 | 2026-10-22 | Own kb-server (T8, T9), migration 2 (`kb_collections`), embedding comparison, new conversation (migration 3) |
 | — | 2026-10-24 | Development stack in Docker; T15 (migration 4, `kb_trash`); T16 (migration 5) |
+| — | 2026-10-27 | T17 (panel grouped by source, a receipt under each message); T18 (step 5 input cap) |
 | 9 | — | Deployment and pilot: waiting on the open questions |
 
 Not done from Phase 7: the manual test checklists (G6) have not been

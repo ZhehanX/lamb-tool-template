@@ -96,9 +96,10 @@ export function createWorkshopApi({ session, apiBase = DEFAULT_API_BASE, fetchIm
 		 * The request the next message would make, without calling the model.
 		 * @param {string} [message]
 		 * @param {string} [ragMode]
+		 * @param {number | null} [inputCap] - step 5's limit (T18), null for none
 		 */
-		preview: (message = '', ragMode = 'on') =>
-			request('/preview', { method: 'POST', body: { message, rag_mode: ragMode } }),
+		preview: (message = '', ragMode = 'on', inputCap = null) =>
+			request('/preview', { method: 'POST', body: { message, rag_mode: ragMode, input_cap: inputCap } }),
 		/** @param {string} version - the notice version the student read */
 		consent: (version) => request('/consent', { method: 'PUT', body: { version } }),
 		/** Earlier turns stay stored but are no longer sent as history. */
@@ -118,7 +119,7 @@ export function createWorkshopApi({ session, apiBase = DEFAULT_API_BASE, fetchIm
 		trace: (id) => request(`/traces/${id}`),
 		/**
 		 * Start a chat turn; resolves to the streaming Response.
-		 * @param {{message: string, rag_mode: string}} body
+		 * @param {{message: string, rag_mode: string, input_cap?: number | null}} body
 		 * @param {AbortSignal} [signal]
 		 */
 		chat: (body, signal) => request('/chat', { method: 'POST', body, signal, raw: true })

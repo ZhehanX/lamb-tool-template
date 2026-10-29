@@ -30,6 +30,8 @@
 	 *   onProbeKb?: () => void,
 	 *   kb?: {status: string, chunks?: number, chunk_size?: number, chunk_overlap?: number},
 	 *   acceptedTypes?: string[],
+	 *   inputCaps?: number[],
+	 *   inputLimit?: number,
 	 *   submitting?: boolean,
 	 *   uploading?: boolean,
 	 *   removing?: boolean,
@@ -47,6 +49,8 @@
 		onProbeKb,
 		kb = { status: 'none' },
 		acceptedTypes = ['.txt', '.md', '.pdf', '.docx', '.pptx', '.html'],
+		inputCaps = [],
+		inputLimit = 0,
 		submitting = false,
 		uploading = false,
 		removing = false,
@@ -122,6 +126,14 @@
 	/** @param {boolean} on */
 	function setRagMode(on) {
 		form.ragMode = on ? 'on' : 'off';
+	}
+
+	/**
+	 * Numbers in the language of the interface, not of the computer.
+	 * @param {number} value
+	 */
+	function fmt(value) {
+		return Number(value || 0).toLocaleString($locale || 'en');
 	}
 
 	const reflectionQuestions = $derived([
@@ -306,6 +318,30 @@
 					</div>
 					<p class="text-xs text-gray-500 mt-2">
 						{$_('workshop.abHint', { default: 'On: only the excerpts of your document most similar to your question are sent. Off: the whole document is sent. Ask the same question both ways, with a new conversation in between, and compare the answers.' })}
+					</p>
+				</div>
+			{/if}
+
+			{#if inputCaps.length}
+				<!-- The cap experiment (T18): the budget's cuts (T14) on the student's own material -->
+				<div class="border rounded p-3" data-testid="input-cap">
+					<span class="text-sm font-medium">
+						{$_('workshop.capTitle', { default: 'Tokens the model can read' })}
+					</span>
+					<div class="mt-2 flex flex-wrap rounded border overflow-hidden text-xs w-fit" role="group">
+						{#each [null, ...inputCaps] as cap (cap ?? 0)}
+							<button
+								class="px-3 py-1 {form.inputCap === cap ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}"
+								aria-pressed={form.inputCap === cap}
+								data-testid="input-cap-{cap ?? 'all'}"
+								onclick={() => (form.inputCap = cap)}
+							>{cap === null
+								? $_('workshop.capAll', { values: { limit: fmt(inputLimit) }, default: `All (${fmt(inputLimit)})` })
+								: fmt(cap)}</button>
+						{/each}
+					</div>
+					<p class="text-xs text-gray-500 mt-2">
+						{$_('workshop.capHint', { default: 'An experiment: let the model read fewer tokens, and watch in the panel what the workshop leaves out to make room: first earlier tool results, then the end of your document, then the oldest messages. The model never sees what is left out.' })}
 					</p>
 				</div>
 			{/if}

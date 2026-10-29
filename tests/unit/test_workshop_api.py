@@ -113,6 +113,9 @@ def test_chat_turn_frames_storage_and_history(client, lamb):
     assert turns[0]["rag_mode"] == "off" and turns[1]["rag_mode"] == "off"
     trace = client.get(f"/workshop/api/traces/{turns[0]['trace_id']}", headers=headers).json()
     assert trace["payload"] == lamb["requests"][0] and trace["model"] == "qwen3.5:9b"
+    # Each message's receipt in the chat shows its request's size (T17).
+    assert turns[0]["tokens"] == result["tokens_estimated"]
+    assert turns[1]["tokens"] > turns[0]["tokens"], "the second request also carries the first exchange"
 
 
 def test_ollama_error_is_an_error_turn_not_an_answer(client, lamb):
@@ -141,8 +144,43 @@ def test_chat_rejects_a_message_that_cannot_fit(client, lamb):
     settings_store.set_value("engine_context_tokens", "4096")
     r = client.post("/workshop/api/chat", headers=headers, json={"message": "paraula " * 5000})
     assert (r.status_code, r.json()["code"]) == (413, "context_overflow")
+    assert r.json()["hint"] == "", "no step-5 cap to point at"
     assert store.get_turns(*_scope(headers)) == [], "nothing was stored or sent"
     assert lamb["requests"] == []
+
+
+def test_the_step5_cap_lowers_what_is_sent(client, lamb):
+    """T18: the cap cuts the request for real, and the trace records it."""
+    headers, _ = launch()
+    assert client.get("/workshop/api/state", headers=headers).json()["budget"]["input_caps"] ==         [8000, 4000, 2000]
+    text = "La fotosíntesi passa als cloroplasts. " * 800
+    client.post("/workshop/api/document", headers=headers,
+                files={"file": ("apunts.md", text.encode("utf-8"), "text/markdown")})
+
+    def preview(cap):
+        data = client.post("/workshop/api/preview", headers=headers,
+                           json={"message": "Hola", "input_cap": cap}).json()["data"]
+        return data["budget"], data["tokens_estimated"]
+
+    budget, used = preview(2000)
+    assert budget["input_cap"] == 2000 and budget["input_limit"] == 2000 and used <= 2000
+    assert budget["document"]["truncated"] is True
+    for ignored in (None, 123, 50000, "x"):
+        budget, _ = preview(ignored)
+        assert budget["input_cap"] is None and budget["input_limit"] == 24780
+        assert budget["document"]["truncated"] is False
+
+    lamb["replies"] += [["D'acord."]]
+    out = frames_of(client.post("/workshop/api/chat", headers=headers,
+                                json={"message": "Resumeix", "input_cap": 2000}))
+    assert out[0]["data"]["budget"]["input_cap"] == 2000
+    assert out[0]["data"]["request_body"] == lamb["requests"][0], "the panel shows what was sent"
+    assert len(lamb["requests"][0]["messages"][0]["content"]) < len(text.strip())
+
+    r = client.post("/workshop/api/chat", headers=headers,
+                    json={"message": "paraula " * 2500, "input_cap": 2000})
+    assert (r.status_code, r.json()["code"]) == (413, "context_overflow")
+    assert "step 5" in r.json()["hint"]
 
 
 def _scope(headers):

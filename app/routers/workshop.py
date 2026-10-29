@@ -48,7 +48,7 @@ def state(request: Request):
         "engine": {"configured": bool(settings_store.get("engine_model"))},
         "kb": service.kb_status(uid, rlid, guid),
         "budget": {"context_tokens": b.context_tokens, "input_limit": b.input_limit,
-                   "tokenizer": service.counter().name},
+                   "tokenizer": service.counter().name, "input_caps": service.input_caps()},
         "limits": {"document_bytes": documents.MAX_BYTES, "document_types": documents.ACCEPTED},
         "consent": {"version": service.CONSENT_VERSION, "accepted": service.has_consented(session),
                     "model_note": store.get_settings(rlid, guid)["consent_model_note"],
@@ -129,15 +129,26 @@ def kb(request: Request):
     return service.kb_status(*service.scope(session))
 
 
+def _input_cap(body: dict) -> int | None:
+    """The limit the student chose in step 5 (T18); service.budget keeps only
+    the listed ones."""
+    try:
+        return int(body.get("input_cap") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
 @router.post("/preview")
 async def preview(request: Request):
     session = sessions.resolve_session(request)
     body = await request.json() if await request.body() else {}
     try:
         return service.preview(session, str(body.get("message") or ""),
-                               "off" if body.get("rag_mode") == "off" else "on")
+                               "off" if body.get("rag_mode") == "off" else "on",
+                               _input_cap(body))
     except ContextOverflow as e:
-        return _error(413, "context_overflow", str(e), needed=e.needed, limit=e.limit)
+        return _error(413, "context_overflow", str(e), needed=e.needed, limit=e.limit,
+                      hint=service.overflow_hint(e))
 
 
 @router.post("/probe")
@@ -165,7 +176,7 @@ async def chat(request: Request):
         return _error(400, "empty", "Empty message.")
     rag_mode = "off" if body.get("rag_mode") == "off" else "on"
     try:
-        stream = service.start_chat(session, message, rag_mode)
+        stream = service.start_chat(session, message, rag_mode, _input_cap(body))
     except service.NotReady as e:
         return _error(409, "not_ready", str(e))
     except service.RateLimited as e:
@@ -174,7 +185,7 @@ async def chat(request: Request):
         return _error(413, "context_overflow",
                       "This message does not fit in what the model can read, even without "
                       "the document and the earlier messages. Write a shorter message.",
-                      needed=e.needed, limit=e.limit)
+                      needed=e.needed, limit=e.limit, hint=service.overflow_hint(e))
     return StreamingResponse(stream, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

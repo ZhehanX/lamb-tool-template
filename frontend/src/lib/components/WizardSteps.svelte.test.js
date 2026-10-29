@@ -223,6 +223,23 @@ describe('WizardSteps — steps 3 to 6', () => {
 		expect(form.ragMode).toBe('off');
 	});
 
+	test('step 5 offers the caps the server lists, and all by default (T18)', async () => {
+		const { unmount } = render(WizardSteps, { props: { form: formAt(5) } });
+		expect(screen.queryByTestId('input-cap')).toBeNull();
+		unmount();
+
+		const form = formAt(5);
+		render(WizardSteps, { props: { form, inputCaps: [8000, 4000, 2000], inputLimit: 24780 } });
+		expect(form.inputCap).toBeNull();
+		expect(screen.getByTestId('input-cap-all')).toHaveTextContent('All (24,780)');
+		expect(screen.getByTestId('input-cap-all')).toHaveAttribute('aria-pressed', 'true');
+		await fireEvent.click(screen.getByTestId('input-cap-2000'));
+		expect(form.inputCap).toBe(2000);
+		expect(screen.getByTestId('input-cap-2000')).toHaveAttribute('aria-pressed', 'true');
+		await fireEvent.click(screen.getByTestId('input-cap-all'));
+		expect(form.inputCap).toBeNull();
+	});
+
 	test('step 6 submits, says when it was submitted, and has no Next', async () => {
 		let submits = 0;
 		const form = formAt(6);

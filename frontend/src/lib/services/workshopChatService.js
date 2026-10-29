@@ -19,6 +19,7 @@
  * @param {ReturnType<import('./workshopApi.js').createWorkshopApi>} params.api
  * @param {string} params.message
  * @param {string} [params.ragMode] - 'on' | 'off' (A/B experiment)
+ * @param {number | null} [params.inputCap] - step 5's limit (T18), null for none
  * @param {Object} handlers
  * @param {(chunk: string) => void} [handlers.onChunk]
  * @param {(data: Object) => void} [handlers.onObservability]
@@ -28,12 +29,12 @@
  * @param {(msg: string, info: {code?: string, hint?: string, status?: number}) => void} [handlers.onError]
  * @param {AbortSignal} [signal]
  */
-export async function sendWorkshopChat({ api, message, ragMode = 'on' }, handlers = {}, signal) {
+export async function sendWorkshopChat({ api, message, ragMode = 'on', inputCap = null }, handlers = {}, signal) {
 	const { onChunk, onObservability, onToolEvent, onToolMessages, onDone, onError } = handlers;
 
 	let res;
 	try {
-		res = await api.chat({ message, rag_mode: ragMode }, signal);
+		res = await api.chat({ message, rag_mode: ragMode, input_cap: inputCap }, signal);
 	} catch (/** @type {any} */ e) {
 		// AbortError on Stop / unmount is expected; do not surface as an error.
 		if (e?.name === 'AbortError') return;

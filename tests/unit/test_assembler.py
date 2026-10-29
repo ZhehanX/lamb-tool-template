@@ -276,3 +276,20 @@ def test_overflow_when_the_message_alone_is_too_long():
 
 def test_budget_numbers():
     assert Budget(context_tokens=32768, reserve_output=3072, margin=0.15).input_limit == 24780
+
+
+# --- the step-5 cap (T18) ---------------------------------------------------
+
+def test_a_cap_only_lowers_the_limit():
+    assert Budget(input_cap=2000).input_limit == 2000
+    assert Budget(context_tokens=4096, reserve_output=512, input_cap=8000).input_limit == 2969
+
+
+def test_the_cap_cuts_for_real_and_is_recorded():
+    doc = words(3000, "Text de l'alumne. ")
+    messages, trace = build(full_config(doc), HISTORY, "Resumeix", budget=Budget(input_cap=2000))
+
+    assert trace.tokens_estimated <= 2000
+    assert trace.budget["input_cap"] == 2000 and trace.budget["input_limit"] == 2000
+    assert trace.budget["document"]["truncated"] is True
+    assert_segments_rebuild_messages(messages, trace)

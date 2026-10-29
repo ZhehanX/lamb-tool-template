@@ -83,14 +83,22 @@ def fail_turn(turn_id: int, error: str, trace_id: int | None) -> None:
 
 def get_turns(user_id: int, resource_link_id: str, consumer_guid: str, limit: int = 200):
     """Turns, oldest first, each with `retrieved`: how many course excerpts
-    went into its prompt (read from its trace), for the A/B comparison."""
+    went into its prompt (read from its trace), for the A/B comparison, and
+    for the chat's receipts (T17) `tokens`, the request's estimated size, and
+    `tool_calls`, the calls of this turn's tool rounds the request carried
+    (calls resent as history are not counted)."""
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT t.*, COALESCE((
                    SELECT COUNT(*) FROM traces tr,
                           json_each(tr.data, '$.retrieval.candidates') AS c
                    WHERE tr.id = t.trace_id AND json_extract(c.value, '$.selected') = 1
-               ), 0) AS retrieved
+               ), 0) AS retrieved,
+               (SELECT json_extract(tr.data, '$.tokens_estimated') FROM traces tr
+                WHERE tr.id = t.trace_id) AS tokens,
+               (SELECT COUNT(*) FROM traces tr, json_each(tr.data, '$.segments') AS s
+                WHERE tr.id = t.trace_id AND json_extract(s.value, '$.source') = 'tools'
+                  AND json_extract(s.value, '$.meta.tool_round') = 'call') AS tool_calls
                FROM turns t
                WHERE t.user_id = ? AND t.resource_link_id = ? AND t.consumer_guid = ?
                ORDER BY t.id DESC LIMIT ?""",

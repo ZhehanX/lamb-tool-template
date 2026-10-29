@@ -98,6 +98,8 @@ def test_the_next_turn_resends_the_rounds_as_they_were_sent(client, lamb, studen
         {"role": "user", "content": "I el doble?"}]
     turns = client.get("/workshop/api/state", headers=student).json()["turns"]
     assert turns[0]["assistant"] == "Ho calculo.\nFa 391.", "the chat keeps what the student saw"
+    # The receipts (T17) count each message's own calls, not those resent as history.
+    assert [t["tool_calls"] for t in turns] == [1, 0]
 
 
 def test_the_preview_shows_the_earlier_rounds(client, lamb, student):

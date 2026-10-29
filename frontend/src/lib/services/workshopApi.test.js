@@ -47,7 +47,7 @@ describe('createWorkshopApi', () => {
 	test('the other calls hit their routes', async () => {
 		const { api, fetchImpl } = setup();
 		await api.removeDocument();
-		await api.preview('Hola', 'off');
+		await api.preview('Hola', 'off', 2000);
 		await api.saveReflection({ answers: { q1: 'x' }, submit: true });
 		await api.trace(7);
 		await api.feedback();
@@ -59,7 +59,7 @@ describe('createWorkshopApi', () => {
 			['GET', '/workshop/api/traces/7'],
 			['POST', '/workshop/api/feedback']
 		]);
-		expect(JSON.parse(/** @type {any} */ (fetchImpl.mock.calls[1])[1].body)).toEqual({ message: 'Hola', rag_mode: 'off' });
+		expect(JSON.parse(/** @type {any} */ (fetchImpl.mock.calls[1])[1].body)).toEqual({ message: 'Hola', rag_mode: 'off', input_cap: 2000 });
 	});
 
 	test('chat resolves to the raw streaming response', async () => {

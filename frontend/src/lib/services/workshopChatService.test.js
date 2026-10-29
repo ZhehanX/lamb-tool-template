@@ -26,10 +26,12 @@ function apiWith(chat) {
 const sse = (/** @type {any} */ obj) => `data: ${JSON.stringify(obj)}\n\n`;
 
 describe('sendWorkshopChat', () => {
-	test('sends only the message and the mode: the server builds the request', async () => {
+	test('sends only the message, the mode and the cap: the server builds the request', async () => {
 		const api = apiWith(async () => streamOf(['data: [DONE]\n\n']));
 		await sendWorkshopChat({ api, message: 'Hola', ragMode: 'off' }, {});
-		expect(api.chat).toHaveBeenCalledWith({ message: 'Hola', rag_mode: 'off' }, undefined);
+		expect(api.chat).toHaveBeenCalledWith({ message: 'Hola', rag_mode: 'off', input_cap: null }, undefined);
+		await sendWorkshopChat({ api, message: 'Hola', ragMode: 'on', inputCap: 2000 }, {});
+		expect(api.chat).toHaveBeenLastCalledWith({ message: 'Hola', rag_mode: 'on', input_cap: 2000 }, undefined);
 	});
 
 	test('dispatches a full turn in order', async () => {
