@@ -139,8 +139,12 @@ def run():
               "What your next message would send" in page.text_content('[data-testid="panel-request"]'))
         next_step(page, 2)
 
-        # Step 2
-        page.set_input_files("input[type=file]", doc_path)
+        # Step 2. Wait for the upload itself, not only the card: a design save
+        # made meanwhile already returns the stored document, and an upload
+        # still running (a cold kb-server) refreshes the panel after the turn.
+        with page.expect_response(lambda r: r.url.endswith("/workshop/api/document")
+                                  and r.request.method == "POST", timeout=60000):
+            page.set_input_files("input[type=file]", doc_path)
         page.wait_for_selector('[data-testid="document-card"]', timeout=20000)
         check("step 2: the document is attached", "apunts-e2e.md" in page.inner_text('[data-testid="document-card"]'))
         page.wait_for_selector('[data-testid=panel-part][data-source=document]', timeout=15000)
